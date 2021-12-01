@@ -45,7 +45,7 @@ void loop() {
       setupLoop();
       break;
     case GAME:
-        gameLoop();
+      gameLoop();
       if (GAMEPLAYER == blinkMode) {
         switch (game) {
           case WAIT:
@@ -113,14 +113,24 @@ void inertLoop() {
               startTimer.never();
               break;
             case GAME:
+              byte neighbours = 0;
+              FOREACH_FACE(f) {
+                if (!isValueReceivedOnFaceExpired(f)) {
+                  neighbours++;
+                }
+              }
               signalState = val;
               gameMode = val;
-              blinkMode = GAMEPLAYER;
-              connectedFace = f;
-              startTimer.set(startMultiplier * (random(4) + 2));
-              game = WAIT;
-              sp.println("game is 0");
-              gameTimer.never();
+              if (1 == neighbours) {
+                blinkMode = GAMEPLAYER;
+                connectedFace = f;
+                startTimer.set(startMultiplier * (random(4) + 2));
+                game = WAIT;
+                sp.println("game is 0");
+                gameTimer.never();
+              } else {
+                blinkMode = SCORER;
+              }
               break;
           }
           sendReceived = true;
@@ -219,7 +229,7 @@ void gameLoop() {
     }
     if (!gameTimer.isExpired() && FAIL != game && WAIT != game) {
       byte clicks = 0;
-      if(buttonMultiClicked()) {
+      if (buttonMultiClicked()) {
         clicks = buttonClickCount();
       }
       bool sglClick = buttonSingleClicked();
