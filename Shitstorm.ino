@@ -240,7 +240,7 @@ void receivedGame(byte face) {
     gameTimer.never();
   } else if (2 == neighbours) {
     blinkMode = CONNECTOR;
-  } else if (3 == neighbours) {
+  } else { //if (3 == neighbours) {
     blinkMode = SPUR;
   }
 
