@@ -23,21 +23,35 @@ int gameOverFace = -1;
 bool gameOver = false;
 bool gameOverPublished = false;
 
+
+
 #define PULSE_LENGTH 750
 
 //ServicePortSerial sp;
 
 Timer gameTimer;
-#define gameLength 5000
-
 Timer startTimer;
-#define startMultiplier 1000
+
+//---Low Intensity---
+//#define gameLength 5000
+//#define startMultiplier 1000
+
+//---Medium Intensity---
+//#define gameLength 5000
+//#define startMultiplier 500
+
+//---High Intensity---
+#define gameLength 2500
+#define startMultiplier 500
+
+#define failLength 1000
+
 
 void setup() {
   randomize();
   setColor(OFF);
-  setValueSentOnAllFaces(INERT<<2);
-//  sp.begin();
+  setValueSentOnAllFaces(INERT << 2);
+  //  sp.begin();
 }
 
 void loop() {
@@ -58,7 +72,8 @@ void loop() {
 
   if (SETUP == gameMode) {
     setupLoop();
-  } else if (GAME == gameMode) {
+    drawSetup();
+  } else if (GAME == gameMode && INERT <= signalState) {
 
     gameLoop();
     if (GAMEPLAYER == blinkMode) {
@@ -90,9 +105,9 @@ void loop() {
       }
     } else if (GAMEPLAYER < blinkMode) {
       drawScore();
-      if (LIFELOSS == signalState) {
-        setColor(RED);
-      }
+      //      if (LIFELOSS == signalState) {
+      //        setColor(RED);
+      //      }
     } else {
       setColor(OFF);
     }
@@ -143,44 +158,13 @@ void inertLoop() {
       if (!isValueReceivedOnFaceExpired(f) ) {//a neighbor!
         val = getSignalState(getLastValueReceivedOnFace(f));
         if (val < INERT ) {//a neighbor saying SEND!
-//          sp.print("SEND Received - moving to mode ");
-//          sp.println(val);
+          sendReceived = true;
+          //          sp.print("SEND Received - moving to mode ");
+          //          sp.println(val);
           if (SETUP == val) {
-            gameOver = false;
-            gameOverPublished = false;
-            gameOverState = 0;
-            score = 0;
-            signalState = val;
-            gameMode = val;
-            connectedFace = 7;
-            targetFace = 7;
-            gameTimer.never();
-            startTimer.never();
-
+            receivedSetup(f);
           } else if ( GAME == val) {
-            byte neighbours = 0;
-            FOREACH_FACE(d) {
-              if (!isValueReceivedOnFaceExpired(d)) {
-                neighbours++;
-              }
-            }
-            signalState = val;
-            gameMode = val;
-            if (1 == neighbours) {
-              blinkMode = GAMEPLAYER;
-              connectedFace = f;
-              startTimer.set(startMultiplier * (random(4) + 2));
-              game = WAIT;
-              //              sp.println("game is 0");
-              gameTimer.never();
-            } else if (2 == neighbours) {
-              blinkMode = CONNECTOR;
-              connectedFace = f;
-            } else if (3 == neighbours) {
-              blinkMode = SPUR;
-              connectedFace = f;
-            }
-
+            receivedGame(f);
           }
           else if ( LIFELOSS == val) {
             //            sp.println("HELLO!!!");
@@ -197,35 +181,84 @@ void inertLoop() {
                 gameOver = true;
               }
               //GAMEOVER!!!
-            } else {
+            } else if (GAMEPLAYER < blinkMode && f != connectedFace) {
               //              sp.println("Moving to LIFELOSS");
               if (score < 6) {
                 score++;
                 signalState = RESOLVE;
+                sendReceived = false; // in case there are more than one sending a score through
               } else {
                 signalState = val;
               }
+            } else {
+              sendReceived = false;
             }
 
           } else if (GAMEOVER == val) {
-            gameOverState = getPayload(getLastValueReceivedOnFace(f));
-            signalState = GAMEOVER;
-            gameMode = GAMEOVER;
+            if (SETUP < signalState) {
+              gameOverState = getPayload(getLastValueReceivedOnFace(f));
+              signalState = GAMEOVER;
+              gameMode = GAMEOVER;
+            } else {
+              sendReceived = false;
+            }
           }
-          sendReceived = true;
         }
       }
     }
   }
 }
 
+void receivedSetup(byte face) {
+  gameOver = false;
+  gameOverPublished = false;
+  gameOverState = 0;
+  score = 0;
+  signalState = SETUP;
+  gameMode = SETUP;
+  connectedFace = 7;
+  targetFace = 7;
+  gameTimer.never();
+  startTimer.never();
+}
+
+void receivedGame(byte face) {
+  byte neighbours = 0;
+  FOREACH_FACE(d) {
+    if (!isValueReceivedOnFaceExpired(d)) {
+      neighbours++;
+    }
+  }
+  signalState = GAME;
+  gameMode = GAME;
+  connectedFace = face;
+  if (1 == neighbours) {
+    blinkMode = GAMEPLAYER;
+    startTimer.set(startMultiplier * (random(4) + 2));
+    game = WAIT;
+    //              sp.println("game is 0");
+    gameTimer.never();
+  } else if (2 == neighbours) {
+    blinkMode = CONNECTOR;
+  } else if (3 == neighbours) {
+    blinkMode = SPUR;
+  }
+
+}
+
 void sendLoop() {
   bool allSend = true;
+  bool allGameOver = true;
+  byte countReceivers = 0;
   //look for neighbors who have not heard the GO news
   FOREACH_FACE(f) {
     if (!isValueReceivedOnFaceExpired(f)) {//a neighbor!
+      countReceivers++;
       byte val = getSignalState(getLastValueReceivedOnFace(f));
-      if (val == INERT) {//This neighbor doesn't know it's SEND time. Stay in SEND
+      if (GAMEOVER != val) {
+        allGameOver = false;
+      }
+      if (val == INERT && (LIFELOSS != signalState || f == connectedFace || GAMEPLAYER == blinkMode)) {//This neighbor doesn't know it's SEND time. Stay in SEND, uless we're ignoring it it
         allSend = false;
       } else if (GAMEOVER == val && GAMEOVER != gameMode) {
         allSend = false;
@@ -236,17 +269,21 @@ void sendLoop() {
         if (INERT > signalState && INERT > val && val != signalState) {
           //conflict!!!
           if (signalState > val) {
-//            sp.println("CONFLICT!");
-            inertLoop();
+            //            sp.println("CONFLICT!");
+            if ( SETUP == val) {
+              receivedSetup(f);
+            }
             return;
           }
         }
       }
     }
   }
-  if (allSend) {
-//    sp.println("All Resolve");
-    signalState = RESOLVE;
+  if (allSend && countReceivers > 0) {
+    //    sp.println("All Resolve");
+    if (signalState != GAMEOVER || allGameOver) {
+      signalState = RESOLVE;
+    }
   }
 }
 
@@ -269,7 +306,7 @@ void resolveLoop() {
     }
   }
   if (allResolve) {
-//    sp.println("All INERT");
+    //    sp.println("All INERT");
     signalState = INERT;
   }
 }
@@ -318,9 +355,14 @@ void gameLoop() {
         game = FAIL;
         //        sp.print("203 game is ");
         //        sp.println(game);
-        gameTimer.set(1000);
+        gameTimer.set(failLength);
         signalState = LIFELOSS;
         return;
+      } else {
+        if (LIFELOSS == signalState) { //lifeloss hasn't been received
+          gameTimer.set(failLength);
+          return;
+        }
       }
       startTimer.set(startMultiplier * (random(4) + 1));
       game = WAIT;
@@ -344,14 +386,18 @@ void gameLoop() {
         //        sp.print("224 game is ");
         //        sp.println(game);
 
-        gameTimer.set(1000);
+        gameTimer.set(failLength);
+        signalState = LIFELOSS;
+
         return;
-      } else if (game < 4 && (clicks > 0 || dblClick || sglClick)) {
+      } else if (game <= 4 && (clicks > 0 || dblClick || sglClick)) {
         game = FAIL;
         //       sp.print("231 game is ");
         //        sp.println(game);
 
-        gameTimer.set(1000);
+        gameTimer.set(failLength);
+        signalState = LIFELOSS;
+
         return;
       }
       switch (game) {
@@ -386,6 +432,13 @@ void gameLoop() {
           }
           break;
         case DOUBLE_C:
+          if (clicks > 2 || sglClick) {
+            game = FAIL;
+            gameTimer.set(failLength);
+            signalState = LIFELOSS;
+
+            return;
+          }
           if (dblClick) {
             startTimer.set(startMultiplier * (random(4) + 1));
             game = WAIT;
@@ -396,6 +449,13 @@ void gameLoop() {
           }
           break;
         case TRIPLE_C:
+          if (dblClick || sglClick) {
+            game = FAIL;
+            gameTimer.set(failLength);
+            signalState = LIFELOSS;
+
+            return;
+          }
           if (3 == clicks) {
             startTimer.set(startMultiplier * (random(4) + 1));
             game = WAIT;
@@ -473,6 +533,7 @@ void drawFlip() {
   byte dimness = 0;
 
   int rotation = 1;
+
   //set color
   FOREACH_FACE(f) {
     if (f < 3) {
@@ -480,8 +541,8 @@ void drawFlip() {
     } else {
       rotation = 1;
     }
-    dimness = sin8_C(pulseMapped + (42 * f * rotation));
-    setColorOnFace(dim(YELLOW, dimness), f);
+    dimness = sin8_C(pulseMapped + (42 * f * rotation)); //f
+    setColorOnFace(dim(YELLOW, dimness), ((f+connectedFace)%6));
   }
 
 }
@@ -544,5 +605,22 @@ void drawGameOver() {
     } else {
       setColor(RED);
     }
+  }
+}
+
+void drawSetup() {
+  setColor(OFF);
+  byte nb = 0;
+  FOREACH_FACE(f) {
+    if (!isValueReceivedOnFaceExpired(f) ) {//a neighbor!
+      nb++;
+      setColorOnFace(BLUE, f);
+    }
+  }
+  if (1 == nb) {
+    setColor(GREEN);
+  }
+  if (CONTROLLER == blinkMode) {
+    setColor(MAGENTA);
   }
 }
