@@ -1,7 +1,7 @@
 
 #include "Serial.h"
 
-enum signalStates {SETUP, GAME, GAMEOVER, LIFELOSS, INERT, RESOLVE};
+enum signalStates {SETUP, GAME, GAMEOVER, LIFELOSS, SHITSTORM, INERT, RESOLVE};
 byte signalState = INERT;
 byte gameMode = SETUP;
 
@@ -27,31 +27,44 @@ bool gameOverPublished = false;
 
 #define PULSE_LENGTH 750
 
-//ServicePortSerial sp;
+ServicePortSerial sp;
 
 Timer gameTimer;
 Timer startTimer;
 
 //---Low Intensity---
-//#define gameLength 5000
-//#define startMultiplier 1000
+//#define gameLength 5000  //sets the time to complete the task
+//#define startMultiplier 1000 //mutplier for the time between tasks (against a random 1-5)
+//#define shitStormLength 3 //number of shitstorm itterations
 
 //---Medium Intensity---
-//#define gameLength 5000
-//#define startMultiplier 500
+#define gameLength 2500
+#define startMultiplier 750
+#define shitStormLength 4
 
 //---High Intensity---
-#define gameLength 2500
-#define startMultiplier 500
+//#define gameLength 2500
+//#define startMultiplier 500
+//#define shitStormLength 4
+
+
+#define shitStormWaitTimeModifier 1000 //multiply by 15-20
+#define shitStormWarnTime 4000
+#define shitStormResetTime 3000
+
 
 #define failLength 1000
 
+#define slowControllerPulseTime 2000
+#define fastControllerPulseTime  500
+byte countShitStorm = 0;
+bool startShitStorm = false;
 
 void setup() {
   randomize();
   setColor(OFF);
   setValueSentOnAllFaces(INERT << 2);
-  //  sp.begin();
+  sp.begin();
 }
 
 void loop() {
@@ -103,13 +116,17 @@ void loop() {
           drawTripleClick();
           break;
       }
-    } else if (GAMEPLAYER < blinkMode) {
-      drawScore();
+    } else if (CONTROLLER == blinkMode) {
+      drawControllerPulse();
+    } else {
+      if (SHITSTORM == signalState) {
+        setColor(RED);
+      } else {
+        drawScore();
+      }
       //      if (LIFELOSS == signalState) {
       //        setColor(RED);
       //      }
-    } else {
-      setColor(OFF);
     }
   } else if (GAMEOVER == gameMode) {
     if (CONTROLLER == blinkMode) {
@@ -159,14 +176,13 @@ void inertLoop() {
         val = getSignalState(getLastValueReceivedOnFace(f));
         if (val < INERT ) {//a neighbor saying SEND!
           sendReceived = true;
-          //          sp.print("SEND Received - moving to mode ");
-          //          sp.println(val);
+          sp.print("SEND Received - moving to mode ");
+          sp.println(val);
           if (SETUP == val) {
             receivedSetup(f);
           } else if ( GAME == val) {
             receivedGame(f);
-          }
-          else if ( LIFELOSS == val) {
+          } else if ( LIFELOSS == val) {
             //            sp.println("HELLO!!!");
             if (CONTROLLER == blinkMode) {
               //              sp.println("Moving to RESOLVE");
@@ -202,6 +218,11 @@ void inertLoop() {
             } else {
               sendReceived = false;
             }
+          } else if (SHITSTORM == val) {
+            signalState = SHITSTORM;
+            sp.println("SHITSTORM received");
+            sp.println("Setting shitstorm");
+            startShitStorm = true;
           }
         }
       }
@@ -213,6 +234,8 @@ void receivedSetup(byte face) {
   gameOver = false;
   gameOverPublished = false;
   gameOverState = 0;
+  countShitStorm = 0;
+  startShitStorm = false;
   score = 0;
   signalState = SETUP;
   gameMode = SETUP;
@@ -316,7 +339,31 @@ void setupLoop() {
     signalState = GAME;
     gameMode = GAME;
     blinkMode = CONTROLLER;
+    startTimer.set(4000);
+    startShitStorm = false;
   }
+}
+
+void setupForNextGame() {
+  if (countShitStorm > 0) {
+    countShitStorm++;
+  }
+  if (countShitStorm > 0 && shitStormLength >= countShitStorm) {
+    startTimer.set(100);
+  } else {
+    countShitStorm = 0;
+    startTimer.set(startMultiplier * (random(4) + 1));
+  }
+  game = WAIT;
+  gameTimer.never();
+}
+
+void failGame() {
+  countShitStorm = 0;
+  game = FAIL;
+
+  gameTimer.set(failLength);
+  signalState = LIFELOSS;
 }
 
 void gameLoop() {
@@ -327,7 +374,11 @@ void gameLoop() {
         currentFace = f;
       }
     }
-    if (startTimer.isExpired()) {
+    if (startTimer.isExpired() || (startShitStorm && WAIT==game)) {
+      if(startShitStorm) {
+        countShitStorm++;
+        startShitStorm = false;
+      }
       gameTimer.set(gameLength);
       game = random(4) + 2;
       //     sp.print("180 game is ");
@@ -352,11 +403,7 @@ void gameLoop() {
     }
     if (gameTimer.isExpired()) {
       if (FAIL != game) {
-        game = FAIL;
-        //        sp.print("203 game is ");
-        //        sp.println(game);
-        gameTimer.set(failLength);
-        signalState = LIFELOSS;
+        failGame();
         return;
       } else {
         if (LIFELOSS == signalState) { //lifeloss hasn't been received
@@ -364,11 +411,7 @@ void gameLoop() {
           return;
         }
       }
-      startTimer.set(startMultiplier * (random(4) + 1));
-      game = WAIT;
-      //      sp.print("210 game is ");
-      //      sp.println(game);
-      gameTimer.never();
+      setupForNextGame();
       return;
     }
     if (!gameTimer.isExpired() && FAIL != game && WAIT != game) {
@@ -382,91 +425,71 @@ void gameLoop() {
 
 
       if (currentFace != connectedFace && currentFace != targetFace && currentFace != 7) {
-        game = FAIL;
-        //        sp.print("224 game is ");
-        //        sp.println(game);
-
-        gameTimer.set(failLength);
-        signalState = LIFELOSS;
+        failGame();
 
         return;
       } else if (game <= 4 && (clicks > 0 || dblClick || sglClick)) {
-        game = FAIL;
-        //       sp.print("231 game is ");
-        //        sp.println(game);
-
-        gameTimer.set(failLength);
-        signalState = LIFELOSS;
+        failGame();
 
         return;
       }
       switch (game) {
         case ROTATE_CW:
           if (!isValueReceivedOnFaceExpired(targetFace)) {
-            startTimer.set(startMultiplier * (random(4) + 1));
-            game = WAIT;
-            //            sp.print("242 game is ");
-            //           sp.println(game);
-
-            gameTimer.never();
+            setupForNextGame();
           }
           break;
         case ROTATE_ACW:
           if (!isValueReceivedOnFaceExpired(targetFace)) {
-            startTimer.set(startMultiplier * (random(4) + 1));
-            game = WAIT;
-            //            sp.print("252 game is ");
-            //            sp.println(game);
-
-            gameTimer.never();
+            setupForNextGame();
           }
           break;
         case FLIP:
           if (!isValueReceivedOnFaceExpired(targetFace)) {
-            startTimer.set(startMultiplier * (random(4) + 1));
-            game = WAIT;
-            //            sp.print("261 game is ");
-            //            sp.println(game);
-
-            gameTimer.never();
+            setupForNextGame();
           }
           break;
         case DOUBLE_C:
           if (clicks > 2 || sglClick) {
-            game = FAIL;
-            gameTimer.set(failLength);
-            signalState = LIFELOSS;
+            failGame();
 
             return;
           }
           if (dblClick) {
-            startTimer.set(startMultiplier * (random(4) + 1));
-            game = WAIT;
-            //            sp.print("271 game is ");
-            //            sp.println(game);
-
-            gameTimer.never();
+            setupForNextGame();
           }
           break;
         case TRIPLE_C:
           if (dblClick || sglClick) {
-            game = FAIL;
-            gameTimer.set(failLength);
-            signalState = LIFELOSS;
+            failGame();
 
             return;
           }
           if (3 == clicks) {
-            startTimer.set(startMultiplier * (random(4) + 1));
-            game = WAIT;
-            //            sp.print("282 game is ");
-            //            sp.println(game);
-
-            gameTimer.never();
+            setupForNextGame();
           }
       }
     }
   } else {
+    if (CONTROLLER == blinkMode) {
+      if (startTimer.isExpired()) {
+        //start shitstorm timer
+        gameTimer.set(shitStormWaitTimeModifier * (random(5) + 15));
+        startTimer.never();
+      } else if (gameTimer.isExpired() && !startShitStorm) {
+        //start flashing
+        startShitStorm = true;
+        gameTimer.set(shitStormWarnTime);
+      } else if (gameTimer.isExpired() & startShitStorm) {
+        //send shitstorm instruction, stop flashing, wait until shitstorm might be finished
+        signalState = SHITSTORM;
+        startShitStorm = false;
+        gameTimer.never();
+        startTimer.set(shitStormResetTime);
+      }
+    }
+
+
     if (buttonDoubleClicked()) {
       gameOver = false;
       gameOverPublished = false;
@@ -542,7 +565,7 @@ void drawFlip() {
       rotation = 1;
     }
     dimness = sin8_C(pulseMapped + (42 * f * rotation)); //f
-    setColorOnFace(dim(YELLOW, dimness), ((f+connectedFace)%6));
+    setColorOnFace(dim(YELLOW, dimness), ((f + connectedFace) % 6));
   }
 
 }
@@ -623,4 +646,30 @@ void drawSetup() {
   if (CONTROLLER == blinkMode) {
     setColor(MAGENTA);
   }
+}
+
+void drawControllerPulse() {
+  //setColor(MAGENTA);
+
+  int pt = slowControllerPulseTime;
+  if (startShitStorm) {
+    pt = fastControllerPulseTime;
+  }
+
+  //get progress from 0 - MAX
+  int pulseProgress = millis() % pt;
+
+  //transform that progress to a byte (0-255)
+  byte pulseMapped = map(pulseProgress, 0, pt, 0, 255);
+
+  //transform that byte with sin
+  byte dimness = 0;
+
+  dimness = sin8_C(pulseMapped ); //f
+  if (startShitStorm) {
+    setColor(dim(RED, dimness));
+  } else {
+    setColor(dim(MAGENTA, dimness));
+  }
+
 }
