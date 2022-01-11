@@ -32,23 +32,37 @@ ServicePortSerial sp;
 Timer gameTimer;
 Timer startTimer;
 
-//---Low Intensity---
+
+////---Solo 6 Blinks Intensity---
+//#define gameLength 10000  //sets the time to complete the task
+//#define startMultiplier 2000 //mutplier for the time between tasks (against a random 1-5)
+//#define startRandomiserSize 9
+//#define shitStormLength 3 //number of shitstorm itterations
+//#define shitStormWaitTimeModifier 3000 //multiply by 15-20
+
+//
+////---Low Intensity---
 //#define gameLength 5000  //sets the time to complete the task
 //#define startMultiplier 1000 //mutplier for the time between tasks (against a random 1-5)
+//#define startRandomiserSize 4
 //#define shitStormLength 3 //number of shitstorm itterations
+//#define shitStormWaitTimeModifier 1000 //multiply by 15-20
 
 //---Medium Intensity---
 #define gameLength 2500
 #define startMultiplier 750
+#define startRandomiserSize 4
 #define shitStormLength 4
+#define shitStormWaitTimeModifier 1000 //multiply by 15-20
 
 //---High Intensity---
 //#define gameLength 2500
 //#define startMultiplier 500
+//#define startRandomiserSize 4
 //#define shitStormLength 4
+//#define shitStormWaitTimeModifier 1000 //multiply by 15-20
 
 
-#define shitStormWaitTimeModifier 1000 //multiply by 15-20
 #define shitStormWarnTime 4000
 #define shitStormResetTime 3000
 
@@ -223,6 +237,9 @@ void inertLoop() {
             sp.println("SHITSTORM received");
             sp.println("Setting shitstorm");
             startShitStorm = true;
+            if (CONNECTOR == blinkMode || SPUR == blinkMode) {
+              gameTimer.set(4000);
+            }
           }
         }
       }
@@ -257,7 +274,7 @@ void receivedGame(byte face) {
   connectedFace = face;
   if (1 == neighbours) {
     blinkMode = GAMEPLAYER;
-    startTimer.set(startMultiplier * (random(4) + 2));
+    startTimer.set(startMultiplier * (random(startRandomiserSize) + 2));
     game = WAIT;
     //              sp.println("game is 0");
     gameTimer.never();
@@ -278,12 +295,16 @@ void sendLoop() {
     if (!isValueReceivedOnFaceExpired(f)) {//a neighbor!
       countReceivers++;
       byte val = getSignalState(getLastValueReceivedOnFace(f));
+      if (GAMEOVER == signalState && SETUP == val) {
+              receivedSetup(f);
+              return;
+      }
       if (GAMEOVER != val) {
         allGameOver = false;
       }
       if (val == INERT && (LIFELOSS != signalState || f == connectedFace || GAMEPLAYER == blinkMode)) {//This neighbor doesn't know it's SEND time. Stay in SEND, uless we're ignoring it it
         allSend = false;
-      } else if (GAMEOVER == val && GAMEOVER != gameMode) {
+      } else if (GAMEOVER == val && GAMEOVER != gameMode && SETUP != gameMode) {
         allSend = false;
         gameOverState = getPayload(getLastValueReceivedOnFace(f));
         signalState = GAMEOVER;
@@ -320,7 +341,7 @@ void resolveLoop() {
       if (val < INERT) {//This neighbor isn't in RESOLVE. Stay in RESOLVE
         allResolve = false;
       }
-      if (GAMEOVER == val && GAMEOVER != gameMode) {
+      if (GAMEOVER == val && GAMEOVER != gameMode && SETUP != gameMode) {
         allResolve = false;
         gameOverState = getPayload(getLastValueReceivedOnFace(f));
         signalState = GAMEOVER;
@@ -352,7 +373,7 @@ void setupForNextGame() {
     startTimer.set(100);
   } else {
     countShitStorm = 0;
-    startTimer.set(startMultiplier * (random(4) + 1));
+    startTimer.set(startMultiplier * (random(startRandomiserSize) + 1));
   }
   game = WAIT;
   gameTimer.never();
@@ -374,8 +395,8 @@ void gameLoop() {
         currentFace = f;
       }
     }
-    if (startTimer.isExpired() || (startShitStorm && WAIT==game)) {
-      if(startShitStorm) {
+    if (startTimer.isExpired() || (startShitStorm && WAIT == game)) {
+      if (startShitStorm) {
         countShitStorm++;
         startShitStorm = false;
       }
@@ -612,9 +633,38 @@ void drawTripleClick() {
 }
 
 void drawScore() {
-  setColor(OFF);
-  for (byte i = 0; i < score; i++) {
-    setColorOnFace(RED, i);
+  if (startShitStorm) {
+    if ( !gameTimer.isExpired()) {
+      //get progress from 0 - MAX
+      int pulseProgress = millis() % PULSE_LENGTH;
+
+      //transform that progress to a byte (0-255)
+      byte pulseMapped = map(pulseProgress, 0, PULSE_LENGTH, 0, 255);
+
+      //transform that byte with sin
+      byte dimness = 0;
+
+      int rotation = 1;
+
+      //set color
+      FOREACH_FACE(f) {
+        if (f < 3) {
+          rotation = -1;
+        } else {
+          rotation = 1;
+        }
+        dimness = sin8_C(pulseMapped + (42 * f * rotation)); //f
+        setColorOnFace(dim(RED, dimness), ((f + connectedFace) % 6));
+      }
+    } else {
+      startShitStorm = false;
+      gameTimer.never();
+    }
+  } else {
+    setColor(OFF);
+    for (byte i = 0; i < score; i++) {
+      setColorOnFace(RED, i);
+    }
   }
 }
 
