@@ -11,8 +11,8 @@ byte game = WAIT;
 enum blinkModes {UNUSED, GAMEPLAYER, CONNECTOR, SPUR, CONTROLLER};
 byte blinkMode = UNUSED;
 
-enum gameOverStates {GO_WIN, GO_LOSS};
-byte gameOverState = GO_WIN;
+enum gameOverStates {IGNORE, GO_WIN, GO_LOSS};
+byte gameOverState = IGNORE;
 
 byte connectedFace = 7;
 byte targetFace = 7;
@@ -24,10 +24,9 @@ bool gameOver = false;
 bool gameOverPublished = false;
 
 
-
 #define PULSE_LENGTH 750
 
-ServicePortSerial sp;
+//ServicePortSerial sp;
 
 Timer gameTimer;
 Timer startTimer;
@@ -78,15 +77,31 @@ void setup() {
   randomize();
   setColor(OFF);
   setValueSentOnAllFaces(INERT << 2);
-  sp.begin();
+//  sp.begin();
 }
 
 void loop() {
+
+//  FOREACH_FACE(f)
+//  {
+//    if (!isValueReceivedOnFaceExpired(f)) {
+//      sp.print(f);
+//      sp.print(" ");
+//      sp.println(getLastValueReceivedOnFace(f));
+//    }
+//  }
+//
+//  sp.print("s ");
+//  sp.println(signalState);
+//  sp.print("g ");
+//  sp.println(gameMode);
+//  sp.println();
 
   if (CONTROLLER == blinkMode && INERT == signalState && gameOver && !gameOverPublished) {
     signalState = GAMEOVER;
     gameMode = GAMEOVER;
     gameOverPublished = true;
+    gameTimer.never();
   }
 
   if (signalState < INERT) {
@@ -165,15 +180,20 @@ void loop() {
     if (CONTROLLER == blinkMode) {
       FOREACH_FACE(f) {
         if (f == gameOverFace) {
-          setValueSentOnFace(sendData + 1, f);
+          setValueSentOnFace(sendData + GO_LOSS, f);
         } else {
-          setValueSentOnFace(sendData, f);
+          setValueSentOnFace(sendData + GO_WIN, f);
         }
       }
     } else {
       setValueSentOnAllFaces(sendData + gameOverState);
     }
   } else {
+    if (RESOLVE == signalState) {
+      if (GAMEOVER == gameMode) {
+        sendData = sendData + 1;
+      }
+    }
     setValueSentOnAllFaces(sendData);
   }
 
@@ -182,21 +202,22 @@ void loop() {
 
 void inertLoop() {
   bool sendReceived = false;
+  bool gameOverReceived = false;
   byte val = 0;
   byte gameOverCount = 0;
   FOREACH_FACE(f) {
-    if ( !sendReceived) {
+    if ( !sendReceived && !gameOverReceived) {
       if (!isValueReceivedOnFaceExpired(f) ) {//a neighbor!
         val = getSignalState(getLastValueReceivedOnFace(f));
         if (val < INERT ) {//a neighbor saying SEND!
           sendReceived = true;
-          sp.print("SEND Received - moving to mode ");
-          sp.println(val);
+          //          sp.print("SEND Received - moving to mode ");
+          //          sp.println(val);
           if (SETUP == val) {
-            receivedSetup(f);
-          } else if ( GAME == val) {
+            receivedSetup();
+          } else if ( GAME == val && !gameOverReceived) {
             receivedGame(f);
-          } else if ( LIFELOSS == val) {
+          } else if ( LIFELOSS == val && !gameOverReceived) {
             //            sp.println("HELLO!!!");
             if (CONTROLLER == blinkMode) {
               //              sp.println("Moving to RESOLVE");
@@ -229,13 +250,13 @@ void inertLoop() {
               gameOverState = getPayload(getLastValueReceivedOnFace(f));
               signalState = GAMEOVER;
               gameMode = GAMEOVER;
+              gameOverReceived = true;
             } else {
               sendReceived = false;
             }
-          } else if (SHITSTORM == val) {
+          } else if (SHITSTORM == val && !gameOverReceived) {
             signalState = SHITSTORM;
-            sp.println("SHITSTORM received");
-            sp.println("Setting shitstorm");
+//            sp.println("S");
             startShitStorm = true;
             if (CONNECTOR == blinkMode || SPUR == blinkMode) {
               gameTimer.set(4000);
@@ -247,10 +268,10 @@ void inertLoop() {
   }
 }
 
-void receivedSetup(byte face) {
+void receivedSetup() {
   gameOver = false;
   gameOverPublished = false;
-  gameOverState = 0;
+  gameOverState = IGNORE;
   countShitStorm = 0;
   startShitStorm = false;
   score = 0;
@@ -295,9 +316,9 @@ void sendLoop() {
     if (!isValueReceivedOnFaceExpired(f)) {//a neighbor!
       countReceivers++;
       byte val = getSignalState(getLastValueReceivedOnFace(f));
-      if (GAMEOVER == signalState && SETUP == val) {
-              receivedSetup(f);
-              return;
+      if (SETUP != signalState && SETUP == val) {
+        receivedSetup();
+        return;
       }
       if (GAMEOVER != val) {
         allGameOver = false;
@@ -309,25 +330,26 @@ void sendLoop() {
         gameOverState = getPayload(getLastValueReceivedOnFace(f));
         signalState = GAMEOVER;
         gameMode = GAMEOVER;
-      } else {
-        if (INERT > signalState && INERT > val && val != signalState) {
-          //conflict!!!
-          if (signalState > val) {
-            //            sp.println("CONFLICT!");
-            if ( SETUP == val) {
-              receivedSetup(f);
-            }
-            return;
-          }
-        }
       }
+      //      else {
+      //        if (INERT > signalState && INERT > val && val != signalState) {
+      //          //conflict!!!
+      //          if (signalState > val) {
+      //            //            sp.println("CONFLICT!");
+      //            if ( SETUP == val) {
+      //              receivedSetup(f);
+      //            }
+      //            return;
+      //          }
+      //        }
+      //      }
     }
   }
   if (allSend && countReceivers > 0) {
     //    sp.println("All Resolve");
-    if (signalState != GAMEOVER || allGameOver) {
-      signalState = RESOLVE;
-    }
+    //    if (signalState != GAMEOVER || allGameOver) {
+    signalState = RESOLVE;
+    //    }
   }
 }
 
@@ -339,7 +361,16 @@ void resolveLoop() {
     if (!isValueReceivedOnFaceExpired(f)) {//a neighbor!
       byte val = getSignalState(getLastValueReceivedOnFace(f));
       if (val < INERT) {//This neighbor isn't in RESOLVE. Stay in RESOLVE
+        if (SETUP == val && SETUP != gameMode) {
+          receivedSetup ();
+          return;
+        }
         allResolve = false;
+      } else if (RESOLVE == val) {
+        if (0 < getPayload(getLastValueReceivedOnFace(f)) && !gameOver && GAMEOVER != gameMode) {
+          gameOver = true;
+          gameOverState = getPayload(getLastValueReceivedOnFace(f));
+        }
       }
       if (GAMEOVER == val && GAMEOVER != gameMode && SETUP != gameMode) {
         allResolve = false;
@@ -351,7 +382,14 @@ void resolveLoop() {
   }
   if (allResolve) {
     //    sp.println("All INERT");
-    signalState = INERT;
+    if (!gameOver) {
+      signalState = INERT;
+    } else {
+      signalState = GAMEOVER;
+      gameMode = GAMEOVER;
+      gameOver = false;
+    }
+
   }
 }
 
@@ -514,7 +552,7 @@ void gameLoop() {
     if (buttonDoubleClicked()) {
       gameOver = false;
       gameOverPublished = false;
-      gameOverState = 0;
+      gameOverState = IGNORE;
       score = 0;
       signalState = SETUP;
       gameMode = SETUP;
