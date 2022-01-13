@@ -1,7 +1,7 @@
 # Monkey See Monkey Do (MSMD)
 A blinks party game for 1 or more players. The more blinks you have, the more players it will support.
 
-The aim of the game is to follow the instructions displayed on your blinks as quickly as possible. Too slow, and you'll lose a life.
+The aim of the game is to follow the instructions displayed on your blinks as quickly as possible. Too slow, and you'll lose a life. The first player/team to lose all their lives loses. The winners get a banana![^1]
 
 
 ### Setup
@@ -33,7 +33,8 @@ The green blink nearest you will start to flash a pattern, which will tell you w
 
 If you do the wrong action, you will lose a life, and a red segment will be filled in on the connecting blink. When the connecting blink is full, the next life lost will fill in a segment on the next blink towards the controller. If that blink is the controller, than the game is over and you have lost.
 
-After you have been playing for a while, the controller may start pulsing red. Watch out! When it stops pulsing red, the whole board will light up and your blink will ask for a number of instructions in rapid succession. Try and complete them all without losing a life.
+### Fireworks
+After you have been playing for a while, the controller may start pulsing red. Watch out, fireworks are about to happen! When it stops pulsing red, fireworks will launch and scare the monkeys. Your blink will ask for a number of instructions in rapid succession, try and complete them all without losing a life!
 
 Once you are used to the instructions, try playing whilst controlling two blinks, in this configuration:
 
@@ -62,3 +63,4 @@ Feel free to add in extra rules for forfits, or if you want it to be really toug
 
 
 
+[^1]:(Bananas not included)
