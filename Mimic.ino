@@ -1,4 +1,3 @@
-
 #include "Serial.h"
 
 enum signalStates {SETUP, GAME, GAMEOVER, LIFELOSS, SHITSTORM, INERT, RESOLVE};
@@ -609,7 +608,7 @@ void drawFlip() {
   int pulseProgress = millis() % PULSE_LENGTH;
 
   //transform that progress to a byte (0-255)
-  byte pulseMapped = map(pulseProgress, 0, PULSE_LENGTH, 0, 255);
+  byte pulseMapped = map(pulseProgress, 0, PULSE_LENGTH, 64, 192);
 
   //transform that byte with sin
   byte dimness = 0;
@@ -618,13 +617,21 @@ void drawFlip() {
 
   //set color
   FOREACH_FACE(f) {
-    if (f < 3) {
-      rotation = -1;
+  //   if (f < 3) {
+  //     rotation = -1;
+  //   } else {
+  //     rotation = 1;
+  //   }
+  //   dimness = sin8_C(pulseMapped + (42 * f * rotation)); //f
+  //   setColorOnFace(dim(YELLOW, dimness), ((f + connectedFace) % 6));
+    if (f==connectedFace) {
+      dimness = sin8_C(pulseMapped);
+    } else if (f == ((connectedFace+3)%6)) {
+      dimness = sin8_C((pulseMapped+128)%256);
     } else {
-      rotation = 1;
+      dimness = 0;
     }
-    dimness = sin8_C(pulseMapped + (42 * f * rotation)); //f
-    setColorOnFace(dim(YELLOW, dimness), ((f + connectedFace) % 6));
+    setColorOnFace(dim(YELLOW,dimness),f);
   }
 
 }
