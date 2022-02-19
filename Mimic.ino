@@ -1,9 +1,10 @@
+// requires compiler flags:
+//-fno-inline
+// uses Custom Blinklib
+
 #include <blinklib.h>
 
 //#include "Serial.h"
-// requires compiler flags:
-//-funsigned-bitfields -fpack-struct -fshort-enums -fno-tree-scev-cprop -Wall
-//-fno-inline -ffunction-sections -Wl,--gc-sections -Wl,--relax
 
 #define BROWN dim(ORANGE, 100)
 
@@ -13,7 +14,7 @@ enum signalStates {
   GAME_EVEN,         // 1 , 4
   GAMEOVER_LOSE,     // 2, 8
   GAMEOVER_WIN,      // 3, 12
-  SHITSTORM,         // 4, 16
+  BEATDROP,          // 4, 16
   GAMEOVER_NOTSENT,  // 5, 20 this shouldn't be sent!
   INERT,             // 6, 24
   INERT_BRANCH,      // 7, 28
@@ -62,8 +63,8 @@ Timer missingPlayerTimer;
 ////---Solo 6 Blinks Intensity---
 //#define GAMELENGTH 10000  //sets the time to complete the task
 //#define startMultiplier 2000 //mutplier for the time between tasks (against a
-// random 1-5) #define startRandomiserSize 9 #define shitStormLength 3 //number
-// of shitstorm itterations #define shitStormWaitTimeModifier 3000 //multiply by
+// random 1-5) #define startRandomiserSize 9 #define BeatDropLength 3 //number
+// of beatdrop itterations #define BeatDropWaitTimeModifier 3000 //multiply by
 // 15-20
 
 //
@@ -72,15 +73,15 @@ Timer missingPlayerTimer;
 //#define startMultiplier 1000 //mutplier for the time between tasks (against a
 //// random 1-5)
 //#define startRandomiserSize 4
-//#define shitStormLength 3 //number of shitstorm itterations
-//#define shitStormWaitTimeModifier 1000 //multiply by 15-20
+//#define BeatDropLength 3 //number of beatdrop itterations
+//#define BeatDropWaitTimeModifier 1000 //multiply by 15-20
 
 //---Medium Intensity---
 #define GAMELENGTH 2000
 #define startMultiplier 750
 #define startRandomiserSize 4
-#define shitStormLength 4
-#define shitStormWaitTimeModifier 1000 // multiply by 15-20
+#define BeatDropLength 4
+#define BeatDropWaitTimeModifier 1000 // multiply by 15-20
 
 byte level = 0;
 #define MAX_LEVEL 20
@@ -89,21 +90,27 @@ byte level = 0;
 //#define GAMELENGTH 2000
 //#define startMultiplier 500
 //#define startRandomiserSize 4
-//#define shitStormLength 4
-//#define shitStormWaitTimeModifier 750 //multiply by 15-20
+//#define BeatDropLength 4
+//#define BeatDropWaitTimeModifier 750 //multiply by 15-20
 
-#define shitStormWarnTime 4000
-#define shitStormResetTime 3000
+#define BeatDropWarnTime 4000
+#define BeatDropResetTime 3000
 
 #define failLength 1000
 
-#define slowControllerPulseTime 2000
-#define fastControllerPulseTime 500
-byte countShitStorm = 0;
-bool startShitStorm = false;
+#define slowControllerPulseTime 750
+#define fastControllerPulseTime 333
+byte countBeatDrop = 0;
+bool startBeatDrop = false;
 
 byte countNeighbours = 0;
 byte connections = 0;
+
+Color colorWheel[6] = {MAGENTA, RED, YELLOW, GREEN, CYAN, BLUE};
+byte wheelCycle = 0;
+bool wheelCycleFlag = false;
+bool flipFace[6] = {false, false, false, false, false, false};
+byte faceCycle[6] = {0, 0, 0, 0, 0, 0};
 
 void setup() {
   randomize();
@@ -129,9 +136,7 @@ void loop() {
 
       if (CONTROLLER != blinkMode &&
           (INERT_CONTROLLER == val || RESOLVE_CONTROLLER == val)) {
-        if (connectedFace != f) {
-          changeConnectedFace(f);
-        }
+        changeConnectedFace(f);
       }
 
       // if (INERT != val && INERT_BRANCH != val && INERT_CONTROLLER != val) {
@@ -184,16 +189,29 @@ void loop() {
 
   FOREACH_FACE(f) {
     byte llval = lifeLostState[f];
-    switch (llval) {
-    case LL_INERT:
-      LLInertLoop(f);
-      break;
-    case LL_LOSE_LIFE:
-      LLSendLoop(f);
-      break;
-    case LL_REVERT:
-      LLResolveLoop(f);
-      break;
+    if (!isValueReceivedOnFaceExpired(f)) {
+      byte payload = getPayload(getLastValueReceivedOnFace(f));
+      switch (llval) {
+      case LL_INERT:
+        if (LL_LOSE_LIFE == payload) {
+          receivedLLLoseLife(f);
+        } else if (LL_INERT == payload && connectedFace == f &&
+                   lifeLossCounter > 0) {
+          lifeLostState[f] = LL_LOSE_LIFE;
+          --lifeLossCounter;
+        }
+        break;
+      case LL_LOSE_LIFE:
+        if (LL_INERT != payload) {
+          lifeLostState[f] = LL_REVERT;
+        }
+        break;
+      case LL_REVERT:
+        if (LL_LOSE_LIFE != payload) {
+          lifeLostState[f] = LL_INERT;
+        }
+        break;
+      }
     }
   }
   long pulseProgress = millis() % PULSE_LENGTH;
@@ -264,7 +282,9 @@ void loop() {
       if (CONTROLLER == blinkMode) {
         sendData = INERT_CONTROLLER;
       }
-      if ((BRANCH == blinkMode || CONNECTOR == blinkMode || UNUSED == blinkMode) && connectedFaceSet) {
+      if ((BRANCH == blinkMode || CONNECTOR == blinkMode ||
+           UNUSED == blinkMode) &&
+          connectedFaceSet) {
         // publish path back to controller to opposite faces
         if ((connectedFace + 3) % 6 == f || (connectedFace + 2) % 6 == f ||
             (connectedFace + 4) % 6 == f) {
@@ -314,6 +334,9 @@ void loop() {
   // } else {
   //   setColorOnFace(YELLOW, connectedFace);
   // }
+  // if(amEven) {
+  //   setColorOnFace(MAGENTA, (connectedFace+1)%6);
+  // }
 }
 
 void inertLoop() {
@@ -338,8 +361,14 @@ void inertLoop() {
         case GAMEOVER_WIN:
           receivedGameOver(f, false);
           break;
-        case SHITSTORM:
-          receivedShitShow(f);
+        case BEATDROP:
+          // manually inlined...
+          signalState = BEATDROP;
+          startBeatDrop = true;
+          if (CONNECTOR == blinkMode || BRANCH == blinkMode) {
+            gameTimer.set(GAMELENGTH * 4);
+            wheelCycle = 0;
+          }
           break;
         default:
           break;
@@ -361,7 +390,10 @@ void sendLoop() {
         allSend = false;
       } else if (val < INERT && val != signalState) {
         // there's a clash
-        allSend = false;
+        // as we have multiple versions of the same state (GAMEOVER LOSE vs WIN)
+        // we don't care about clashes
+        // especially as all states start at the controller
+        // allSend = false;
       }
     }
   }
@@ -404,36 +436,36 @@ void resolveLoop() {
   }
 }
 
-void LLInertLoop(byte face) {
-  if (!isValueReceivedOnFaceExpired(face)) {
-    byte payload = getPayload(getLastValueReceivedOnFace(face));
-    if (LL_LOSE_LIFE == payload) {
-      receivedLLLoseLife(face);
-    } else if (LL_INERT == payload && connectedFace == face &&
-               lifeLossCounter > 0) {
-      lifeLostState[face] = LL_LOSE_LIFE;
-      --lifeLossCounter;
-    }
-  }
-}
+// void LLInertLoop(byte face) {
+//   if (!isValueReceivedOnFaceExpired(face)) {
+//     byte payload = getPayload(getLastValueReceivedOnFace(face));
+//     if (LL_LOSE_LIFE == payload) {
+//       receivedLLLoseLife(face);
+//     } else if (LL_INERT == payload && connectedFace == face &&
+//                lifeLossCounter > 0) {
+//       lifeLostState[face] = LL_LOSE_LIFE;
+//       --lifeLossCounter;
+//     }
+//   }
+// }
 
-void LLSendLoop(byte face) {
-  if (!isValueReceivedOnFaceExpired(face)) {
-    byte payload = getPayload(getLastValueReceivedOnFace(face));
-    if (LL_INERT != payload) {
-      lifeLostState[face] = LL_REVERT;
-    }
-  }
-}
+// void LLSendLoop(byte face) {
+//   if (!isValueReceivedOnFaceExpired(face)) {
+//     byte payload = getPayload(getLastValueReceivedOnFace(face));
+//     if (LL_INERT != payload) {
+//       lifeLostState[face] = LL_REVERT;
+//     }
+//   }
+// }
 
-void LLResolveLoop(byte face) {
-  if (!isValueReceivedOnFaceExpired(face)) {
-    byte payload = getPayload(getLastValueReceivedOnFace(face));
-    if (LL_LOSE_LIFE != payload) {
-      lifeLostState[face] = LL_INERT;
-    }
-  }
-}
+// void LLResolveLoop(byte face) {
+//   if (!isValueReceivedOnFaceExpired(face)) {
+//     byte payload = getPayload(getLastValueReceivedOnFace(face));
+//     if (LL_LOSE_LIFE != payload) {
+//       lifeLostState[face] = LL_INERT;
+//     }
+//   }
+// }
 
 void receivedLLLoseLife(byte face) {
   switch (blinkMode) {
@@ -484,8 +516,8 @@ void receivedLLLoseLife(byte face) {
 void receivedSetup() {
   gameOver = false;
   gameOverPublished = false;
-  countShitStorm = 0;
-  startShitStorm = false;
+  countBeatDrop = 0;
+  startBeatDrop = false;
   score = 0;
   signalState = SETUP;
   gameMode = SETUP;
@@ -494,7 +526,11 @@ void receivedSetup() {
   gameTimer.never();
   startTimer.never();
   connections = 0;
-  FOREACH_FACE(f) { lifeLostState[f] = LL_INERT; }
+  FOREACH_FACE(f) {
+    lifeLostState[f] = LL_INERT;
+    flipFace[f] = false;
+    faceCycle[f] = 0;
+  }
   lifeLossCounter = 0;
   if (BRANCH > blinkMode) {
     blinkMode = UNUSED;
@@ -503,6 +539,8 @@ void receivedSetup() {
   evenSent = true;
   amEven = false;
   connectedFaceSet = false;
+  wheelCycle = 0;
+  wheelCycleFlag = false;
 }
 
 void receivedGame(byte face, bool even) {
@@ -540,17 +578,13 @@ void receivedGameOver(byte face, bool lost) {
   startTimer.never();
 }
 
-void receivedShitShow(byte face) {
-  signalState = SHITSTORM;
-  kickoffShitStorm();
-}
-
-void kickoffShitStorm() {
-  startShitStorm = true;
-  if (CONNECTOR == blinkMode || BRANCH == blinkMode) {
-    gameTimer.set(GAMELENGTH * 4);
-  }
-}
+// void receivedBeatDrop(byte face) {
+//   signalState = BEATDROP;
+//   startBeatDrop = true;
+//   if (CONNECTOR == blinkMode || BRANCH == blinkMode) {
+//     gameTimer.set(GAMELENGTH * 4);
+//   }
+// }
 
 void setupLoop() {
   if (CONTROLLER == blinkMode) {
@@ -558,7 +592,7 @@ void setupLoop() {
       signalState = GAME;
       gameMode = GAME;
       startTimer.set(4000);
-      startShitStorm = false;
+      startBeatDrop = false;
     } else if (buttonSingleClicked()) {
       blinkMode = UNUSED;
     }
@@ -576,13 +610,13 @@ void setupLoop() {
 }
 
 void setupForNextGame() {
-  if (countShitStorm > 0) {
-    countShitStorm++;
+  if (countBeatDrop > 0) {
+    countBeatDrop++;
   }
-  if (countShitStorm > 0 && getShitStormLength() >= countShitStorm) {
+  if (countBeatDrop > 0 && getBeatDropLength() >= countBeatDrop) {
     startTimer.set(100);
   } else {
-    countShitStorm = 0;
+    countBeatDrop = 0;
     startTimer.set(getLevelStartTime());
     if (MAX_LEVEL > level) {
       level++;
@@ -617,15 +651,15 @@ int getLevelStartTime() {
     */
 }
 
-byte getShitStormLength() {
+byte getBeatDropLength() {
   if (level < MAX_LEVEL) {
-    return shitStormLength;
+    return BeatDropLength;
   }
-  return shitStormLength + 2;
+  return BeatDropLength + 2;
 }
 
 void failGame() {
-  //  countShitStorm = 0;
+  //  countBeatDrop = 0;
   game = FAIL;
 
   gameTimer.set(failLength);
@@ -644,10 +678,10 @@ void gameLoop() {
     //     currentFace = f; //this should be connectedFace
     //   }
     // }
-    if (startTimer.isExpired() || (startShitStorm && WAIT == game)) {
-      if (startShitStorm) {
-        countShitStorm++;
-        startShitStorm = false;
+    if (startTimer.isExpired() || (startBeatDrop && WAIT == game)) {
+      if (startBeatDrop) {
+        countBeatDrop++;
+        startBeatDrop = false;
       }
       gameTimer.set(GAMELENGTH + (250 * (6 - (level / 4))));
       game = random(4) + 2;
@@ -742,21 +776,22 @@ void gameLoop() {
   } else {
     if (CONTROLLER == blinkMode) {
       if (startTimer.isExpired()) {
-        // start shitstorm timer
-        gameTimer.set(shitStormWaitTimeModifier * (random(5) + 15));
+        // start beatdrop timer
+        gameTimer.set(BeatDropWaitTimeModifier * (random(5) + 15));
         startTimer.never();
-      } else if (gameTimer.isExpired() && !startShitStorm) {
+      } else if (gameTimer.isExpired() && !startBeatDrop) {
         // start flashing
-        startShitStorm = true;
-        gameTimer.set(shitStormWarnTime);
-      } else if (gameTimer.isExpired() & startShitStorm &&
+        startBeatDrop = true;
+        gameTimer.set(BeatDropWarnTime);
+      } else if (gameTimer.isExpired() & startBeatDrop &&
                  INERT == signalState) {
-        // send shitstorm instruction, stop flashing, wait until shitstorm might
+        // send beatdrop instruction, stop flashing, wait until beatdrop might
         // be finished
-        signalState = SHITSTORM;
-        startShitStorm = false;
+        signalState = BEATDROP;
+        startBeatDrop = false;
+        wheelCycle = 0;
         gameTimer.never();
-        startTimer.set(shitStormResetTime);
+        startTimer.set(BeatDropResetTime);
       }
     }
 
@@ -777,9 +812,11 @@ byte getSignalState(byte data) { return ((data >> 2)); }
 byte getPayload(byte data) { return (data & 3); }
 
 void changeConnectedFace(byte newFace) {
-  lifeLostState[newFace] = lifeLostState[connectedFace];
-  lifeLostState[connectedFace] = LL_INERT;
-  connectedFace = newFace;
+  if (connectedFace != newFace) {
+    lifeLostState[newFace] = lifeLostState[connectedFace];
+    lifeLostState[connectedFace] = LL_INERT;
+    connectedFace = newFace;
+  }
   connectedFaceSet = true;
 }
 
@@ -864,7 +901,7 @@ void drawTripleClick() {
 }
 
 void drawScore(bool isBranch, byte pulseMapped) {
-  if (startShitStorm) {
+  if (startBeatDrop) {
     if (!gameTimer.isExpired()) {
 
       byte dimness = 0;
@@ -882,7 +919,7 @@ void drawScore(bool isBranch, byte pulseMapped) {
         setColorOnFace(dim(RED, dimness), ((f + connectedFace) % 6));
       }
     } else {
-      startShitStorm = false;
+      startBeatDrop = false;
       gameTimer.never();
     }
   } else {
@@ -933,7 +970,7 @@ void drawControllerPulse() {
   // setColor(MAGENTA);
 
   int pt = slowControllerPulseTime;
-  if (startShitStorm) {
+  if (startBeatDrop) {
     pt = fastControllerPulseTime;
   }
 
@@ -947,9 +984,18 @@ void drawControllerPulse() {
   byte dimness = 0;
 
   dimness = sin8_C(pulseMapped); // f
-  Color c = MAGENTA;
-  if (startShitStorm) {
-    c = RED;
+
+  Color c = RED;
+  if (!startBeatDrop) {
+    if (dimness < 32) {
+      if (wheelCycleFlag) {
+        wheelCycle = (wheelCycle + 1) % 6;
+        wheelCycleFlag = false;
+      }
+    } else {
+      wheelCycleFlag = true;
+    }
+    c = colorWheel[wheelCycle];
   }
   setColor(dim(c, dimness));
 }
