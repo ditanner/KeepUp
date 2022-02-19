@@ -19,40 +19,40 @@ enum signalStates {
   RESOLVE_BRANCH,    // 10, 40
   RESOLVE_CONTROLLER // 11, 44
 };
-byte signalState = INERT;
-byte gameMode = SETUP;
+ byte signalState = INERT;
+ byte gameMode = SETUP;
 
-bool evenSent = true;
-bool amEven = false;
+ bool evenSent = true;
+ bool amEven = false;
 
 enum lifeLossStates { LL_INERT, LL_LOSE_LIFE, LL_REVERT };
-byte lifeLostState[6] = {LL_INERT, LL_INERT, LL_INERT,
+ byte lifeLostState[6] = {LL_INERT, LL_INERT, LL_INERT,
                          LL_INERT, LL_INERT, LL_INERT};
-byte lifeLossCounter = 0;
+ byte lifeLossCounter = 0;
 
 enum games { WAIT, FAIL, ROTATE_CW, ROTATE_ACW, FLIP, DOUBLE_C, TRIPLE_C };
-byte game = WAIT;
+ byte game = WAIT;
 
 enum blinkModes { UNUSED, GAMEPLAYER, CONNECTOR, BRANCH, CONTROLLER };
-byte blinkMode = UNUSED;
+ byte blinkMode = UNUSED;
 
-byte originalFace = 7;
-byte connectedFace = 0;
-byte targetFace = 7;
+ byte originalFace = 7;
+ byte connectedFace = 0;
+ byte targetFace = 7;
 
-byte score = 0;
+ byte score = 0;
 
-byte gameOverFace = 7;
-bool gameOver = false;
-bool gameOverPublished = false;
+ byte gameOverFace = 7;
+ bool gameOver = false;
+ bool gameOverPublished = false;
 
 #define PULSE_LENGTH 750
 
 // ServicePortSerial sp;
 
-Timer gameTimer;
-Timer startTimer;
-Timer missingPlayerTimer;
+ Timer gameTimer;
+ Timer startTimer;
+ Timer missingPlayerTimer;
 
 #define MAX_TIME_DISCONECTED 5000
 
@@ -79,7 +79,7 @@ Timer missingPlayerTimer;
 #define shitStormLength 4
 #define shitStormWaitTimeModifier 1000 // multiply by 15-20
 
-byte level = 0;
+ byte level = 0;
 #define MAX_LEVEL 20
 
 //---High Intensity---
@@ -96,11 +96,11 @@ byte level = 0;
 
 #define slowControllerPulseTime 2000
 #define fastControllerPulseTime 500
-byte countShitStorm = 0;
-bool startShitStorm = false;
+ byte countShitStorm = 0;
+ bool startShitStorm = false;
 
-byte countNeighbours = 0;
-byte connections = 0;
+ byte countNeighbours = 0;
+ byte connections = 0;
 
 void setup() {
   randomize();
@@ -117,6 +117,8 @@ void loop() {
   bool firstPrint = true;
   byte firstConnectedNeighbour;
   FOREACH_FACE(f) {
+//  for(byte x = 6; x >= 1 ; --x) {
+//    byte f = x-1;
     if (!isValueReceivedOnFaceExpired(f)) {
       byte val = getSignalState(getLastValueReceivedOnFace(f));
       firstConnectedNeighbour = f;
@@ -140,6 +142,7 @@ void loop() {
       //   sp.println(val);
       // }
     }
+    
   }
 
   if ((CONNECTOR == blinkMode || BRANCH == blinkMode) &&
@@ -245,7 +248,7 @@ void loop() {
   buttonDoubleClicked();
   buttonPressed();
   buttonMultiClicked();
-
+  
   FOREACH_FACE(f) {
     byte sendData = signalState;
     if (CONTROLLER == blinkMode && GAMEOVER_NOTSENT == signalState) {
@@ -281,13 +284,17 @@ void loop() {
           sendData = RESOLVE_BRANCH;
         }
       }
-    } else if (GAME==signalState) {
+    } else if (GAME == signalState) {
       if (BRANCH == blinkMode || CONNECTOR == blinkMode) {
-        if(!evenSent && !isValueReceivedOnFaceExpired(f)) {
-          sendData = GAME_EVEN;
-          evenSent=true;
+        if (!evenSent && !isValueReceivedOnFaceExpired(f)) {
+          if ((connectedFace + 3) % 6 == f || (connectedFace + 2) % 6 == f ||
+              (connectedFace + 4) % 6 == f) {
+            sendData = GAME_EVEN;
+            evenSent = true;
+          }
         } else if (!isValueReceivedOnFaceExpired(f)) {
-          evenSent=false;
+          evenSent = false;
+
         }
       }
     }
@@ -298,9 +305,13 @@ void loop() {
 
     setValueSentOnFace(sendData, f);
   }
+
+  
+  
+  
 }
 
-void inertLoop() {
+ void inertLoop() {
   FOREACH_FACE(f) {
     if (!isValueReceivedOnFaceExpired(f)) {
       byte val = getSignalState(getLastValueReceivedOnFace(f));
@@ -311,10 +322,10 @@ void inertLoop() {
           receivedSetup();
           break;
         case GAME:
-          receivedGame(f,false);
+          receivedGame(f, false);
           break;
         case GAME_EVEN:
-          receivedGame(f,true);
+          receivedGame(f, true);
           break;
         case GAMEOVER_LOSE:
           receivedGameOver(f, true);
@@ -333,7 +344,7 @@ void inertLoop() {
   }
 }
 
-void sendLoop() {
+ void sendLoop() {
   byte countReceivers = 0;
   bool allSend = true;
   // look for neighbors who have not heard the GO news
@@ -354,7 +365,7 @@ void sendLoop() {
   }
 }
 
-void resolveLoop() {
+ void resolveLoop() {
   bool allResolve = true;
   bool anyResolve = false;
   byte countReceivers = 0;
@@ -388,7 +399,7 @@ void resolveLoop() {
   }
 }
 
-void LLInertLoop(byte face) {
+ void LLInertLoop(byte face) {
   if (!isValueReceivedOnFaceExpired(face)) {
     byte payload = getPayload(getLastValueReceivedOnFace(face));
     if (LL_LOSE_LIFE == payload) {
@@ -396,12 +407,12 @@ void LLInertLoop(byte face) {
     } else if (LL_INERT == payload && connectedFace == face &&
                lifeLossCounter > 0) {
       lifeLostState[face] = LL_LOSE_LIFE;
-      lifeLossCounter--;
+      --lifeLossCounter;
     }
   }
 }
 
-void LLSendLoop(byte face) {
+ void LLSendLoop(byte face) {
   if (!isValueReceivedOnFaceExpired(face)) {
     byte payload = getPayload(getLastValueReceivedOnFace(face));
     if (LL_INERT != payload) {
@@ -410,7 +421,7 @@ void LLSendLoop(byte face) {
   }
 }
 
-void LLResolveLoop(byte face) {
+ void LLResolveLoop(byte face) {
   if (!isValueReceivedOnFaceExpired(face)) {
     byte payload = getPayload(getLastValueReceivedOnFace(face));
     if (LL_LOSE_LIFE != payload) {
@@ -419,7 +430,7 @@ void LLResolveLoop(byte face) {
   }
 }
 
-void receivedLLLoseLife(byte face) {
+ void receivedLLLoseLife(byte face) {
   switch (blinkMode) {
   case CONTROLLER:
     // game over
@@ -465,7 +476,7 @@ void receivedLLLoseLife(byte face) {
   }
 }
 
-void receivedSetup() {
+ void receivedSetup() {
   gameOver = false;
   gameOverPublished = false;
   countShitStorm = 0;
@@ -488,7 +499,7 @@ void receivedSetup() {
   amEven = false;
 }
 
-void receivedGame(byte face, bool even) {
+ void receivedGame(byte face, bool even) {
   connections = countNeighbours;
   signalState = GAME;
   gameMode = GAME;
@@ -508,7 +519,7 @@ void receivedGame(byte face, bool even) {
   }
 }
 
-void receivedGameOver(byte face, bool lost) {
+ void receivedGameOver(byte face, bool lost) {
   // bit of a tricky one - dont want to take game over from wrong lane
   // try and make sure we only listen to connected face on the branches
 
@@ -523,19 +534,19 @@ void receivedGameOver(byte face, bool lost) {
   startTimer.never();
 }
 
-void receivedShitShow(byte face) {
+ void receivedShitShow(byte face) {
   signalState = SHITSTORM;
   kickoffShitStorm();
 }
 
-void kickoffShitStorm() {
+ void kickoffShitStorm() {
   startShitStorm = true;
   if (CONNECTOR == blinkMode || BRANCH == blinkMode) {
     gameTimer.set(GAMELENGTH * 4);
   }
 }
 
-void setupLoop() {
+ void setupLoop() {
   if (CONTROLLER == blinkMode) {
     if (buttonDoubleClicked() && INERT == signalState) {
       signalState = GAME;
@@ -558,7 +569,7 @@ void setupLoop() {
   }
 }
 
-void setupForNextGame() {
+ void setupForNextGame() {
   if (countShitStorm > 0) {
     countShitStorm++;
   }
@@ -575,9 +586,9 @@ void setupForNextGame() {
   gameTimer.never();
 }
 
-int getLevelStartTime() {
-  if(0==level) {
-    return startMultiplier * (6 + (4*amEven));
+ int getLevelStartTime() {
+  if (0 == level) {
+    return startMultiplier * (6 + (4 * amEven));
   }
   return startMultiplier * (6 - (level / 4));
   //  return startMultiplier * (random(startRandomiserSize - (level/4)) + 1);
@@ -600,16 +611,14 @@ int getLevelStartTime() {
     */
 }
 
-int getLevelGameLength() { return GAMELENGTH + (250 * (6 - (level / 4))); }
-
-byte getShitStormLength() {
+ byte getShitStormLength() {
   if (level < MAX_LEVEL) {
     return shitStormLength;
   }
   return shitStormLength + 2;
 }
 
-void failGame() {
+ void failGame() {
   //  countShitStorm = 0;
   game = FAIL;
 
@@ -621,7 +630,7 @@ void failGame() {
   }
 }
 
-void gameLoop() {
+ void gameLoop() {
   if (GAMEPLAYER == blinkMode) {
     //    byte currentFace = connectedFace;
     // FOREACH_FACE(f) {
@@ -634,7 +643,7 @@ void gameLoop() {
         countShitStorm++;
         startShitStorm = false;
       }
-      gameTimer.set(getLevelGameLength());
+      gameTimer.set(GAMELENGTH + (250 * (6 - (level / 4))));
       game = random(4) + 2;
 
       startTimer.never();
@@ -757,10 +766,6 @@ void gameOverLoop() {
   }
 }
 
-byte stepOverFace(byte face, byte steps) {
-  face = face + steps;
-  return face % 6;
-}
 
 byte getSignalState(byte data) { return ((data >> 2)); }
 
@@ -877,7 +882,7 @@ void drawScore(bool isBranch, byte pulseMapped) {
   } else {
     if (!isBranch) {
       setColor(OFF);
-      for (byte i = 0; i < score; i++) {
+      for (byte i = score-1; i >=0 ; --i) {
         setColorOnFace(RED, i);
       }
     } else {
@@ -899,7 +904,7 @@ void drawGameOver() {
   }
 }
 
-void drawSetup() {
+ void drawSetup() {
   setColor(OFF);
   byte nb = 0;
   FOREACH_FACE(f) {
@@ -918,7 +923,7 @@ void drawSetup() {
   }
 }
 
-void drawControllerPulse() {
+ void drawControllerPulse() {
   // setColor(MAGENTA);
 
   int pt = slowControllerPulseTime;
