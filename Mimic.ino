@@ -106,7 +106,7 @@ bool startBeatDrop = false;
 byte countNeighbours = 0;
 byte connections = 0;
 
-Color colorWheel[6] = {MAGENTA, RED, YELLOW, GREEN, CYAN, BLUE};
+static const Color colorWheel[6] = {MAGENTA, YELLOW, CYAN, RED, BLUE, GREEN};
 byte wheelCycle = 0;
 bool wheelCycleFlag = false;
 bool flipFace[6] = {false, false, false, false, false, false};
@@ -119,7 +119,7 @@ void setup() {
   gameTimer.never();
   startTimer.never();
   missingPlayerTimer.never();
-  //  sp.begin();
+  // sp.begin();
 }
 
 void loop() {
@@ -219,11 +219,27 @@ void loop() {
 
   if (SETUP == gameMode) {
     setupLoop();
-    drawSetup();
+    //    drawSetup();
+    setColor(OFF);
+    FOREACH_FACE(f) {
+      if (!isValueReceivedOnFaceExpired(f)) { // a neighbor!
+        setColorOnFace(BLUE, f);
+      }
+    }
+    if (1 == countNeighbours) {
+      setColor(GREEN);
+    }
+    if (CONTROLLER == blinkMode) {
+      setColor(MAGENTA);
+    } else if (BRANCH == blinkMode) {
+      setColor(BROWN);
+    }
   } else if (GAME == gameMode) {
 
     gameLoop();
     if (GAMEPLAYER == blinkMode) {
+      int mils = millis() % 1000;
+      setColor(OFF);
       switch (game) {
       case WAIT:
         setColor(GREEN);
@@ -244,10 +260,36 @@ void loop() {
       //            drawSingleClick();
       //            break;
       case DOUBLE_C:
-        drawDoubleClick();
+        // drawDoubleClick();
+        if (mils > 750) {
+          //    setColor(BLUE);
+          setColorOnFace(BLUE, 0);
+          setColorOnFace(BLUE, 1);
+          setColorOnFace(BLUE, 2);
+        } else if (mils > 400 && mils <= 650) {
+          //    setColor(BLUE);
+          setColorOnFace(BLUE, 3);
+          setColorOnFace(BLUE, 4);
+          setColorOnFace(BLUE, 5);
+        }
         break;
       case TRIPLE_C:
-        drawTripleClick();
+        // drawTripleClick();
+
+        mils = millis() % 1350;
+        if (mils > 1100) {
+          //    setColor(BLUE);
+          setColorOnFace(BLUE, 0);
+          setColorOnFace(BLUE, 1);
+        } else if (mils > 400 && mils <= 650) {
+          //    setColor(BLUE);
+          setColorOnFace(BLUE, 2);
+          setColorOnFace(BLUE, 3);
+        } else if (mils > 750 && mils <= 1000) {
+          //    setColor(BLUE);
+          setColorOnFace(BLUE, 4);
+          setColorOnFace(BLUE, 5);
+        }
         break;
       }
     } else if (CONTROLLER == blinkMode) {
@@ -258,9 +300,21 @@ void loop() {
   } else if (GAMEOVER_NOTSENT == gameMode || GAMEOVER_LOSE == gameMode ||
              GAMEOVER_WIN == gameMode) {
     if (CONTROLLER == blinkMode) {
-      gameOverLoop();
+      if (buttonDoubleClicked()) {
+        receivedSetup();
+      }
+      //    }
+      // drawGameOver(); - inlined
+      //    if (CONTROLLER == blinkMode) {
+      setColor(GREEN);
+      setColorOnFace(RED, gameOverFace);
+    } else {
+      if (GAMEOVER_WIN == gameMode) {
+        setColor(GREEN);
+      } else {
+        setColor(RED);
+      }
     }
-    drawGameOver();
   }
 
   // dump button data
@@ -308,18 +362,18 @@ void loop() {
       }
     } else if (GAME == signalState) {
       if (BRANCH == blinkMode || CONNECTOR == blinkMode) {
-        if (!evenSent && !isValueReceivedOnFaceExpired(f)) {
-          if ((connectedFace + 3) % 6 == f || (connectedFace + 2) % 6 == f ||
-              (connectedFace + 4) % 6 == f) {
+        if (!isValueReceivedOnFaceExpired(f) &&
+            ((connectedFace + 3) % 6 == f || (connectedFace + 2) % 6 == f ||
+             (connectedFace + 4) % 6 == f)) {
+          if (!evenSent) {
             sendData = GAME_EVEN;
             evenSent = true;
+          } else {
+            evenSent = false;
           }
-        } else if (!isValueReceivedOnFaceExpired(f)) {
-          evenSent = false;
         }
       }
     }
-
     sendData = sendData << 2;
 
     sendData = sendData + lifeLostState[f];
@@ -347,6 +401,9 @@ void inertLoop() {
       if (INERT > val) {
         switch (val) {
         case SETUP:
+          if (CONTROLLER == blinkMode) {
+            blinkMode = UNUSED;
+          }
           receivedSetup();
           break;
         case GAME:
@@ -367,7 +424,10 @@ void inertLoop() {
           startBeatDrop = true;
           if (CONNECTOR == blinkMode || BRANCH == blinkMode) {
             gameTimer.set(GAMELENGTH * 4);
-            wheelCycle = 0;
+            FOREACH_FACE(face) {
+              flipFace[face] = false;
+              faceCycle[face] = 0;
+            }
           }
           break;
         default:
@@ -390,10 +450,9 @@ void sendLoop() {
         allSend = false;
       } else if (val < INERT && val != signalState) {
         // there's a clash
-        // as we have multiple versions of the same state (GAMEOVER LOSE vs WIN)
-        // we don't care about clashes
-        // especially as all states start at the controller
-        // allSend = false;
+        // as we have multiple versions of the same state (GAMEOVER LOSE vs
+        // WIN) we don't care about clashes especially as all states start at
+        // the controller allSend = false;
       }
     }
   }
@@ -428,8 +487,8 @@ void resolveLoop() {
 
   if (allResolve && countReceivers >= connections) {
     // prevent controller moving to Inert until all neighbours are Inert
-    // prevent branches from moving to Inert until all non-connectedFace blinks
-    // are Intert
+    // prevent branches from moving to Inert until all non-connectedFace
+    // blinks are Intert
     if (!anyResolve) {
       signalState = INERT;
     }
@@ -634,19 +693,11 @@ int getLevelStartTime() {
   //  return startMultiplier * (random(startRandomiserSize - (level/4)) + 1);
   /*  switch (level / 4) {
       case(0):
-        return startMultiplier * (random(2) + 3); // odd or even would be better
-      case(1):
-        return startMultiplier * (random(startRandomiserSize) + 3);
-        break;
-      case(2):
-        return startMultiplier * (random(startRandomiserSize) + 1);
-        break;
-      case(3):
-        return startMultiplier * 2;
-        break;
-      case(4):
-        return startMultiplier;
-        break;
+        return startMultiplier * (random(2) + 3); // odd or even would be
+    better case(1): return startMultiplier * (random(startRandomiserSize) +
+    3); break; case(2): return startMultiplier * (random(startRandomiserSize)
+    + 1); break; case(3): return startMultiplier * 2; break; case(4): return
+    startMultiplier; break;
     }
     */
 }
@@ -790,6 +841,7 @@ void gameLoop() {
         signalState = BEATDROP;
         startBeatDrop = false;
         wheelCycle = 0;
+        wheelCycleFlag = false;
         gameTimer.never();
         startTimer.set(BeatDropResetTime);
       }
@@ -801,11 +853,11 @@ void gameLoop() {
   }
 }
 
-void gameOverLoop() {
-  if (buttonDoubleClicked()) {
-    receivedSetup();
-  }
-}
+// void gameOverLoop() {
+//   if (buttonDoubleClicked()) {
+//     receivedSetup();
+//   }
+// }
 
 byte getSignalState(byte data) { return ((data >> 2)); }
 
@@ -830,6 +882,9 @@ void drawRotate(bool clockwise, byte pulseMapped) {
       dimness = sin8_C(pulseMapped - (42 * f));
     } else {
       dimness = sin8_C(pulseMapped + (42 * f));
+    }
+    if(dimness<32) {
+      dimness = 0;
     }
     setColorOnFace(dim(MAGENTA, dimness), f);
   }
@@ -859,48 +914,49 @@ void drawFlip() {
   }
 }
 
-void drawSingleClick() {
-  setColor(OFF);
-  if (millis() % 650 > 400) {
-    setColor(BLUE);
-  }
-}
+// void drawSingleClick() {
+//   setColor(OFF);
+//   if (millis() % 650 > 400) {
+//     setColor(BLUE);
+//   }
+// }
 
-void drawDoubleClick() {
-  setColor(OFF);
-  int mils = millis() % 1000;
-  if (mils > 750) {
-    //    setColor(BLUE);
-    setColorOnFace(BLUE, 0);
-    setColorOnFace(BLUE, 1);
-    setColorOnFace(BLUE, 2);
-  } else if (mils > 400 && mils <= 650) {
-    //    setColor(BLUE);
-    setColorOnFace(BLUE, 3);
-    setColorOnFace(BLUE, 4);
-    setColorOnFace(BLUE, 5);
-  }
-}
+// void drawDoubleClick() {
+//   setColor(OFF);
+//   int mils = millis() % 1000;
+//   if (mils > 750) {
+//     //    setColor(BLUE);
+//     setColorOnFace(BLUE, 0);
+//     setColorOnFace(BLUE, 1);
+//     setColorOnFace(BLUE, 2);
+//   } else if (mils > 400 && mils <= 650) {
+//     //    setColor(BLUE);
+//     setColorOnFace(BLUE, 3);
+//     setColorOnFace(BLUE, 4);
+//     setColorOnFace(BLUE, 5);
+//   }
+// }
 
-void drawTripleClick() {
-  setColor(OFF);
-  int mils = millis() % 1350;
-  if (mils > 1100) {
-    //    setColor(BLUE);
-    setColorOnFace(BLUE, 0);
-    setColorOnFace(BLUE, 1);
-  } else if (mils > 400 && mils <= 650) {
-    //    setColor(BLUE);
-    setColorOnFace(BLUE, 2);
-    setColorOnFace(BLUE, 3);
-  } else if (mils > 750 && mils <= 1000) {
-    //    setColor(BLUE);
-    setColorOnFace(BLUE, 4);
-    setColorOnFace(BLUE, 5);
-  }
-}
+// void drawTripleClick() {
+//   setColor(OFF);
+//   int mils = millis() % 1350;
+//   if (mils > 1100) {
+//     //    setColor(BLUE);
+//     setColorOnFace(BLUE, 0);
+//     setColorOnFace(BLUE, 1);
+//   } else if (mils > 400 && mils <= 650) {
+//     //    setColor(BLUE);
+//     setColorOnFace(BLUE, 2);
+//     setColorOnFace(BLUE, 3);
+//   } else if (mils > 750 && mils <= 1000) {
+//     //    setColor(BLUE);
+//     setColorOnFace(BLUE, 4);
+//     setColorOnFace(BLUE, 5);
+//   }
+// }
 
 void drawScore(bool isBranch, byte pulseMapped) {
+
   if (startBeatDrop) {
     if (!gameTimer.isExpired()) {
 
@@ -915,8 +971,19 @@ void drawScore(bool isBranch, byte pulseMapped) {
         } else {
           rotation = 1;
         }
-        dimness = sin8_C(pulseMapped + (42 * f * rotation)); // f
-        setColorOnFace(dim(RED, dimness), ((f + connectedFace) % 6));
+        dimness = sin8_C(pulseMapped + (42 * f * rotation));
+        if (dimness < 32) {
+          dimness = 0;
+          if (flipFace[f]) {
+            flipFace[f] = false;
+            faceCycle[f] = (faceCycle[f] + 1) % 6;
+          }
+        } else if (dimness > 200) {
+          flipFace[f] = true;
+        }
+
+        setColorOnFace(dim(colorWheel[faceCycle[f]], dimness),
+                       ((f + connectedFace) % 6));
       }
     } else {
       startBeatDrop = false;
@@ -934,40 +1001,40 @@ void drawScore(bool isBranch, byte pulseMapped) {
   }
 }
 
-void drawGameOver() {
-  if (CONTROLLER == blinkMode) {
-    setColor(OFF);
-    setColorOnFace(RED, gameOverFace);
-  } else {
-    if (GAMEOVER_WIN == gameMode) {
-      setColor(GREEN);
-    } else {
-      setColor(RED);
-    }
-  }
-}
+// void drawGameOver() {
+//   if (CONTROLLER == blinkMode) {
+//     setColor(OFF);
+//     setColorOnFace(RED, gameOverFace);
+//   } else {
+//     if (GAMEOVER_WIN == gameMode) {
+//       setColor(GREEN);
+//     } else {
+//       setColor(RED);
+//     }
+//   }
+// }
 
-void drawSetup() {
-  setColor(OFF);
-  byte nb = 0;
-  FOREACH_FACE(f) {
-    if (!isValueReceivedOnFaceExpired(f)) { // a neighbor!
-      nb++;
-      setColorOnFace(BLUE, f);
-    }
-  }
-  if (1 == nb) {
-    setColor(GREEN);
-  }
-  if (CONTROLLER == blinkMode) {
-    setColor(MAGENTA);
-  } else if (BRANCH == blinkMode) {
-    setColor(BROWN);
-  }
-}
+// void drawSetup() {
+//   setColor(OFF);
+//   byte nb = 0;
+//   FOREACH_FACE(f) {
+//     if (!isValueReceivedOnFaceExpired(f)) { // a neighbor!
+//       nb++;
+//       setColorOnFace(BLUE, f);
+//     }
+//   }
+//   if (1 == nb) {
+//     setColor(GREEN);
+//   }
+//   if (CONTROLLER == blinkMode) {
+//     setColor(MAGENTA);
+//   } else if (BRANCH == blinkMode) {
+//     setColor(BROWN);
+//   }
+// }
 
 void drawControllerPulse() {
-  // setColor(MAGENTA);
+  //  setColor(MAGENTA);
 
   int pt = slowControllerPulseTime;
   if (startBeatDrop) {
@@ -987,12 +1054,13 @@ void drawControllerPulse() {
 
   Color c = RED;
   if (!startBeatDrop) {
-    if (dimness < 32) {
+    if (dimness <= 32) {
+      dimness = 0;
       if (wheelCycleFlag) {
         wheelCycle = (wheelCycle + 1) % 6;
         wheelCycleFlag = false;
       }
-    } else {
+    } else if (dimness > 200) {
       wheelCycleFlag = true;
     }
     c = colorWheel[wheelCycle];
