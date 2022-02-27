@@ -27,7 +27,6 @@ byte signalState = INERT;
 byte gameMode = SETUP;
 
 bool evenSent = true;
-bool amEven = false;
 
 enum lifeLossStates { LL_INERT, LL_LOSE_LIFE, LL_REVERT };
 byte lifeLostState[6] = {LL_INERT, LL_INERT, LL_INERT,
@@ -254,7 +253,21 @@ void loop() {
         drawRotate(false, pulseMapped);
         break;
       case FLIP:
-        drawFlip();
+        //        drawFlip();
+
+        // transform that progress to a byte (64-192)
+        pulseMapped = ((pulseProgress * 128) / PULSE_LENGTH) + 64;
+
+        // set color
+        FOREACH_FACE(f) {
+          if (f == ((targetFace + 3) % 6)) {
+            setColorOnFace(dim(YELLOW, sin8_C(pulseMapped)), f);
+          } else if (f == targetFace) {
+            setColorOnFace(dim(YELLOW, sin8_C((pulseMapped + 128) % 256)), f);
+          } else {
+            setColorOnFace(OFF, f);
+          }
+        }
         break;
       //          case SINGLE_C:
       //            drawSingleClick();
@@ -374,7 +387,7 @@ void loop() {
         }
       }
     }
-    sendData = sendData << 2;
+    sendData = (sendData << 2);
 
     sendData = sendData + lifeLostState[f];
 
@@ -596,7 +609,6 @@ void receivedSetup() {
   }
   level = 0;
   evenSent = true;
-  amEven = false;
   connectedFaceSet = false;
   wheelCycle = 0;
   wheelCycleFlag = false;
@@ -607,11 +619,11 @@ void receivedGame(byte face, bool even) {
   signalState = GAME;
   gameMode = GAME;
 
-  amEven = even;
-  // connectedFace = face;
+    // connectedFace = face;
   if (1 == countNeighbours) {
     blinkMode = GAMEPLAYER;
-    startTimer.set(getLevelStartTime());
+    startTimer.set(+startMultiplier * (6 + (4 * even)));
+    // startTimer.set(getLevelStartTime());
     game = WAIT;
     //              sp.println("game is 0");
     gameTimer.never();
@@ -672,41 +684,23 @@ void setupForNextGame() {
   if (countBeatDrop > 0) {
     countBeatDrop++;
   }
-  if (countBeatDrop > 0 && getBeatDropLength() >= countBeatDrop) {
+  byte bdl = BeatDropLength;
+  if (level >= MAX_LEVEL) {
+    bdl = bdl + 2;
+  }
+
+  if (countBeatDrop > 0 && bdl >= countBeatDrop) {
     startTimer.set(100);
   } else {
     countBeatDrop = 0;
-    startTimer.set(getLevelStartTime());
+    startTimer.set(startMultiplier * (6 - (level / 4)));
+
     if (MAX_LEVEL > level) {
       level++;
     }
   }
   game = WAIT;
   gameTimer.never();
-}
-
-int getLevelStartTime() {
-  if (0 == level) {
-    return startMultiplier * (6 + (4 * amEven));
-  }
-  return startMultiplier * (6 - (level / 4));
-  //  return startMultiplier * (random(startRandomiserSize - (level/4)) + 1);
-  /*  switch (level / 4) {
-      case(0):
-        return startMultiplier * (random(2) + 3); // odd or even would be
-    better case(1): return startMultiplier * (random(startRandomiserSize) +
-    3); break; case(2): return startMultiplier * (random(startRandomiserSize)
-    + 1); break; case(3): return startMultiplier * 2; break; case(4): return
-    startMultiplier; break;
-    }
-    */
-}
-
-byte getBeatDropLength() {
-  if (level < MAX_LEVEL) {
-    return BeatDropLength;
-  }
-  return BeatDropLength + 2;
 }
 
 void failGame() {
@@ -883,36 +877,36 @@ void drawRotate(bool clockwise, byte pulseMapped) {
     } else {
       dimness = sin8_C(pulseMapped + (42 * f));
     }
-    if(dimness<32) {
+    if (dimness < 32) {
       dimness = 0;
     }
     setColorOnFace(dim(MAGENTA, dimness), f);
   }
 }
 
-void drawFlip() {
+// void drawFlip() {
 
-  // get progress from 0 - MAX
-  long pulseProgress = millis() % PULSE_LENGTH;
+//   // get progress from 0 - MAX
+//   long pulseProgress = millis() % PULSE_LENGTH;
 
-  // transform that progress to a byte (64-192)
-  byte pulseMapped = ((pulseProgress * 128) / PULSE_LENGTH) + 64;
+//   // transform that progress to a byte (64-192)
+//   byte pulseMapped = ((pulseProgress * 128) / PULSE_LENGTH) + 64;
 
-  // transform that byte with sin
-  byte dimness = sin8_C(pulseMapped);
-  byte oppDimness = sin8_C((pulseMapped + 128) % 256);
+//   // transform that byte with sin
+//   byte dimness = sin8_C(pulseMapped);
+//   byte oppDimness = sin8_C((pulseMapped + 128) % 256);
 
-  // set color
-  FOREACH_FACE(f) {
-    if (f == ((targetFace + 3) % 6)) {
-      setColorOnFace(dim(YELLOW, dimness), f);
-    } else if (f == targetFace) {
-      setColorOnFace(dim(YELLOW, oppDimness), f);
-    } else {
-      setColorOnFace(OFF, f);
-    }
-  }
-}
+//   // set color
+//   FOREACH_FACE(f) {
+//     if (f == ((targetFace + 3) % 6)) {
+//       setColorOnFace(dim(YELLOW, dimness), f);
+//     } else if (f == targetFace) {
+//       setColorOnFace(dim(YELLOW, oppDimness), f);
+//     } else {
+//       setColorOnFace(OFF, f);
+//     }
+//   }
+// }
 
 // void drawSingleClick() {
 //   setColor(OFF);
@@ -972,13 +966,13 @@ void drawScore(bool isBranch, byte pulseMapped) {
           rotation = 1;
         }
         dimness = sin8_C(pulseMapped + (42 * f * rotation));
-        if (dimness < 32) {
+        if (dimness <= 32) {
           dimness = 0;
           if (flipFace[f]) {
             flipFace[f] = false;
             faceCycle[f] = (faceCycle[f] + 1) % 6;
           }
-        } else if (dimness > 200) {
+        } else if (dimness > 64 && (0 == f || flipFace[(f + 5) % 6])) {
           flipFace[f] = true;
         }
 
